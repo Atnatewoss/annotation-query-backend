@@ -23,6 +23,8 @@ class Graph:
         return graph
 
     def group_node_only(self, graph, request):
+        if graph_native:
+            return graph_native.group_node_only(graph, request)
         nodes = graph['nodes']
         new_graph = {'nodes': [], 'edges': []}
 
