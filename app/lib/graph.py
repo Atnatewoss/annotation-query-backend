@@ -651,6 +651,11 @@ class Graph:
         return G
 
     def build_subgraph_nx(self, graph):
+        if graph_native and not isinstance(graph, (nx.Graph, nx.DiGraph, nx.MultiDiGraph, nx.MultiGraph)):
+            subgraphs_data = graph_native.build_subgraph_nx(graph)
+            # Convert back to NX objects
+            return [self.build_graph_nx(sd) for sd in subgraphs_data]
+        
         # Identify connected components
         connected_components = list(nx.weakly_connected_components(graph))
 
