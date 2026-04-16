@@ -194,3 +194,74 @@ Graph collapse_nodes(const Graph& graph) {
     }
     return new_graph;
 }
+
+Graph collapse_node_nx(const Graph& graph) {
+    struct Adj {
+        set<pair<string, string>> in;
+        set<pair<string, string>> out;
+    };
+    unordered_map<string, Adj> adj;
+    unordered_map<string, py::dict> node_data_map;
+    
+    for (const auto& n : graph.nodes) {
+        py::dict data;
+        for (auto const& [k, v] : n.attrs) data[py::str(k)] = v;
+        node_data_map[n.id] = data;
+    }
+    
+    for (const auto& e : graph.edges) {
+        adj[e.target].in.insert({e.source, e.edge_id});
+        adj[e.source].out.insert({e.target, e.edge_id});
+    }
+    
+    unordered_map<string, vector<string>> groups;
+    for (const auto& n : graph.nodes) {
+        string sig = "I";
+        for (auto const& p : adj[n.id].in) sig += "|" + p.first + ":" + p.second;
+        sig += ";O";
+        for (auto const& p : adj[n.id].out) sig += "|" + p.first + ":" + p.second;
+        groups[sig].push_back(n.id);
+    }
+    
+    Graph result;
+    unordered_map<string, string> old_to_new;
+    
+    for (auto const& [sig, nodes] : groups) {
+        string merged_id = generate_nanoid();
+        for (const auto& old_id : nodes) old_to_new[old_id] = merged_id;
+        
+        string base_type = node_data_map[nodes[0]]["type"].cast<string>();
+        string name = (nodes.size() == 1) ? node_data_map[nodes[0]]["name"].cast<string>() : to_string(nodes.size()) + " " + base_type + " nodes";
+        
+        Node mn;
+        mn.id = merged_id;
+        mn.attrs["id"] = py::cast(merged_id);
+        mn.attrs["type"] = py::cast(base_type);
+        mn.attrs["name"] = py::cast(name);
+        
+        py::list children;
+        for (const auto& old_id : nodes) children.append(node_data_map[old_id]);
+        mn.attrs["nodes"] = children;
+        
+        result.nodes.push_back(mn);
+    }
+    
+    set<tuple<string, string, string>> added_edges;
+    for (const auto& e : graph.edges) {
+        string s = old_to_new[e.source];
+        string t = old_to_new[e.target];
+        if (s == t) continue;
+        
+        auto key = make_tuple(s, t, e.edge_id);
+        if (added_edges.find(key) == added_edges.end()) {
+            Edge ne = e;
+            ne.id = generate_nanoid();
+            ne.source = s;
+            ne.target = t;
+            result.edges.push_back(ne);
+            added_edges.insert(key);
+        }
+    }
+    return result;
+}
+
