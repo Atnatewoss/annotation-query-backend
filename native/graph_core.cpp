@@ -265,3 +265,163 @@ Graph collapse_node_nx(const Graph& graph) {
     return result;
 }
 
+py::dict convert_to_graph_json(const Graph& graph, bool allow_data) {
+    py::dict res;
+    py::list nodes;
+    for (const auto& n : graph.nodes) {
+        if (allow_data) {
+            py::dict d;
+            d["data"] = n.attrs;
+            nodes.append(d);
+        } else {
+            nodes.append(n.attrs);
+        }
+    }
+    py::list edges;
+    for (const auto& e : graph.edges) {
+        py::dict ed;
+        py::dict ed_data;
+        ed_data["id"] = py::cast(e.id);
+        ed_data["source"] = py::cast(e.source);
+        ed_data["target"] = py::cast(e.target);
+        ed_data["edge_id"] = py::cast(e.edge_id);
+        ed_data["label"] = py::cast(e.label);
+        for (auto const& [k, v] : e.attrs) ed_data[py::str(k)] = v;
+        
+        if (allow_data) {
+            ed["data"] = ed_data;
+            edges.append(ed);
+        } else {
+            edges.append(ed_data);
+        }
+    }
+    res["nodes"] = nodes;
+    res["edges"] = edges;
+    return res;
+}
+
+Graph group_into_parents(Graph graph) {
+    auto [node_mapping, node_to_id_map] = get_node_to_connections_map(graph);
+    
+    struct ParentInfo {
+        string id;
+        string node;
+        string edge_id;
+        string label;
+        int count;
+        bool is_source;
+        set<string> key_nodes_set;
+    };
+    
+    unordered_map<string, ParentInfo> parent_map;
+    
+    for (auto const& [node_id, connections] : node_mapping) {
+        for (auto const& [edge_id, record] : connections) {
+            py::set nodes_set = record["nodes"].cast<py::set>();
+            if (nodes_set.size() < 2) continue;
+            
+            vector<string> key_nodes;
+            for (auto n : nodes_set) key_nodes.push_back(n.cast<string>());
+            sort(key_nodes.begin(), key_nodes.end());
+            
+            string key = "";
+            for (const auto& k : key_nodes) key += (key.empty() ? "" : ",") + k;
+            
+            if (parent_map.find(key) == parent_map.end()) {
+                ParentInfo pi;
+                pi.id = generate_nanoid();
+                pi.node = node_id;
+                pi.edge_id = edge_id;
+                pi.label = extract_middle(edge_id);
+                pi.count = key_nodes.size();
+                pi.is_source = record["is_source"].cast<bool>();
+                for (const auto& k : key_nodes) pi.key_nodes_set.insert(k);
+                parent_map[key] = pi;
+            }
+        }
+    }
+    
+    unordered_set<string> invalid_groups;
+    for (auto const& [k1, p1] : parent_map) {
+        for (auto const& [k2, p2] : parent_map) {
+            if (k1 == k2) continue;
+            if (p1.is_source == p2.is_source && p2.count > p1.count) {
+                bool intersect = false;
+                for (const auto& n : p1.key_nodes_set) {
+                    if (p2.key_nodes_set.count(n)) { intersect = true; break; }
+                }
+                if (intersect) { invalid_groups.insert(k1); break; }
+            }
+        }
+    }
+    for (const auto& k : invalid_groups) parent_map.erase(k);
+    
+    unordered_set<string> active_parents;
+    unordered_map<string, vector<string>> grouped_nodes;
+    
+    for (auto& n : graph.nodes) {
+        int max_count = 0;
+        string selected_parent = "";
+        for (auto const& [key, p] : parent_map) {
+            if (p.key_nodes_set.count(n.id) && p.count > max_count) {
+                selected_parent = p.id;
+                max_count = p.count;
+            }
+        }
+        if (!selected_parent.empty()) {
+            n.attrs["parent"] = py::cast(selected_parent);
+            active_parents.insert(selected_parent);
+            grouped_nodes[selected_parent].push_back(n.id);
+        }
+    }
+    
+    for (auto const& [pid, nodes] : grouped_nodes) {
+        if (nodes.size() < 2) {
+            active_parents.erase(pid);
+            for (auto& n : graph.nodes) {
+                if (n.attrs.count("parent") && n.attrs["parent"].cast<string>() == pid) {
+                    n.attrs["parent"] = py::cast("");
+                }
+            }
+        }
+    }
+    
+    for (const auto& p : active_parents) {
+        Node pn;
+        pn.id = p;
+        pn.attrs["id"] = py::cast(p);
+        pn.attrs["type"] = py::cast("parent");
+        pn.attrs["name"] = py::cast(p);
+        graph.nodes.push_back(pn);
+    }
+    
+    vector<Edge> new_edges;
+    for (const auto& e : graph.edges) {
+        bool keep = true;
+        for (auto const& [key, p] : parent_map) {
+            if (active_parents.find(p.id) == active_parents.end()) continue;
+            string edge_neighbor = p.is_source ? e.target : e.source;
+            string edge_parent = p.is_source ? e.source : e.target;
+            
+            if (p.key_nodes_set.count(edge_neighbor) && p.node == edge_parent && p.edge_id == e.edge_id) {
+                keep = false;
+                break;
+            }
+        }
+        if (keep) new_edges.push_back(e);
+    }
+    
+    for (auto const& [key, p] : parent_map) {
+        if (active_parents.find(p.id) == active_parents.end()) continue;
+        Edge ne;
+        ne.id = generate_nanoid();
+        ne.edge_id = p.edge_id;
+        ne.label = p.label;
+        if (p.is_source) { ne.source = p.node; ne.target = p.id; }
+        else { ne.source = p.id; ne.target = p.node; }
+        new_edges.push_back(ne);
+    }
+    graph.edges = new_edges;
+    return graph;
+}
+
