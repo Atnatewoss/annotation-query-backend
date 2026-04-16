@@ -518,6 +518,8 @@ class Graph:
         return self.convert_to_graph_json(G, allow_data=False)
 
     def break_grouping(self, graph):
+        if graph_native:
+            return graph_native.break_grouping(graph)
         nodes = graph['nodes']
         edges = graph['edges']
 
@@ -606,9 +608,12 @@ class Graph:
 
         for key, value in node_to_edge_relationship.items():
             edge_id_arr = key.split(' ')
-            middle_arr = edge_id_arr[1].split('_')
-            middle = '_'.join(middle_arr[1:len(middle_arr)])
-            edge_id = f'{edge_id_arr[0]}_{middle}'
+            if len(edge_id_arr) > 1:
+                middle_arr = edge_id_arr[1].split('_')
+                middle = '_'.join(middle_arr[1:len(middle_arr)])
+                edge_id = f'{edge_id_arr[0]}_{middle}'
+            else:
+                edge_id = f"{value['source']}_{value['label']}_{value['target']}"
             response['edges'].append({
                 'data': {
                     'id': generate(),
