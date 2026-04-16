@@ -425,7 +425,9 @@ Graph group_into_parents(Graph graph) {
     return graph;
 }
 
-
+Graph group_graph(const Graph& graph) {
+    return group_into_parents(collapse_node_nx(graph));
+}
 
 Graph break_grouping(const Graph& graph) {
     unordered_map<string, vector<string>> parent_to_children;
