@@ -274,6 +274,8 @@ class Graph:
         This creates compound (parent) nodes for groups of nodes
         that share identical edges.
         """
+        if graph_native:
+            return graph_native.group_into_parents(graph)
         # Create directed graph to capture edge relationships
         G = nx.DiGraph()
 
@@ -426,6 +428,8 @@ class Graph:
         return graph
 
     def collapse_node_nx_location(self, graph):
+        if graph_native:
+            return graph_native.collapse_node_nx_location(graph)
         G = nx.DiGraph()
         node_to_id_map = {}
         original_id_to_main_id = {}
