@@ -16,6 +16,8 @@ class Graph:
         pass
 
     def group_graph(self, graph):
+        if graph_native:
+            return graph_native.group_graph(graph)
         graph = self.collapse_node_nx(graph)
         graph = self.group_into_parents(graph)
         return graph
