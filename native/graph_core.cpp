@@ -427,6 +427,107 @@ Graph group_into_parents(Graph graph) {
 
 
 
+Graph break_grouping(const Graph& graph) {
+    unordered_map<string, vector<string>> parent_to_children;
+    unordered_set<string> parent_ids;
+    for (const auto& n : graph.nodes) {
+        if (n.attrs.count("type") && n.attrs.at("type").cast<string>() == "parent") {
+            parent_ids.insert(n.id);
+            parent_to_children[n.id] = {};
+        }
+    }
+    for (const auto& n : graph.nodes) {
+        if (n.attrs.count("parent")) {
+            string pid = n.attrs.at("parent").cast<string>();
+            if (parent_ids.count(pid)) parent_to_children[pid].push_back(n.id);
+        }
+    }
+    
+    vector<Edge> intermediate_edges;
+    for (const auto& e : graph.edges) {
+        if (parent_ids.count(e.source)) {
+            for (const auto& child : parent_to_children[e.source]) {
+                Edge ne = e; ne.id = generate_nanoid(); ne.source = child; intermediate_edges.push_back(ne);
+            }
+        } else if (parent_ids.count(e.target)) {
+            for (const auto& child : parent_to_children[e.target]) {
+                Edge ne = e; ne.id = generate_nanoid(); ne.target = child; intermediate_edges.push_back(ne);
+            }
+        } else {
+            intermediate_edges.push_back(e);
+        }
+    }
+    
+    unordered_map<string, py::dict> node_id_map;
+    for (const auto& n : graph.nodes) node_id_map[n.id] = py::cast(n.attrs);
+    
+    struct EdgeRel { string s, l, t; };
+    map<string, EdgeRel> final_rels;
+    
+    for (const auto& e : intermediate_edges) {
+        if (node_id_map.count(e.source) && node_id_map.count(e.target)) {
+            py::dict s_data = node_id_map[e.source];
+            py::dict t_data = node_id_map[e.target];
+            
+            vector<string> s_nodes, t_nodes;
+            if (s_data["type"].cast<string>() != "parent") {
+                if (s_data.contains("nodes")) {
+                    for (auto n : s_data["nodes"].cast<py::list>()) s_nodes.push_back(n.cast<py::dict>()["id"].cast<string>());
+                } else s_nodes.push_back(e.source);
+            }
+            if (t_data["type"].cast<string>() != "parent") {
+                if (t_data.contains("nodes")) {
+                    for (auto n : t_data["nodes"].cast<py::list>()) t_nodes.push_back(n.cast<py::dict>()["id"].cast<string>());
+                } else t_nodes.push_back(e.target);
+            }
+            
+            for (const auto& sn : s_nodes) {
+                for (const auto& tn : t_nodes) {
+                    string key = sn + "_" + e.label + "_" + tn;
+                    final_rels[key] = {sn, e.label, tn};
+                }
+            }
+        }
+    }
+    
+    Graph result;
+    for (auto const& [key, rel] : final_rels) {
+        Edge ne;
+        ne.id = generate_nanoid();
+        ne.source = rel.s;
+        ne.target = rel.t;
+        ne.label = rel.l;
+        // Edge ID reconstruction logic from Python: f'{edge_id_arr[0]}_{middle}'
+        // This is a bit specific to the data, but I'll try to mimic.
+        ne.edge_id = rel.s + "_" + rel.l; 
+        result.edges.push_back(ne);
+    }
+    
+    unordered_set<string> added_nodes;
+    for (const auto& n : graph.nodes) {
+        if (n.attrs.count("type") && n.attrs.at("type").cast<string>() != "parent") {
+            if (n.attrs.count("nodes")) {
+                for (auto sn : n.attrs.at("nodes").cast<py::list>()) {
+                    py::dict snd = sn.cast<py::dict>();
+                    string sid = snd["id"].cast<string>();
+                    if (added_nodes.find(sid) == added_nodes.end()) {
+                        Node nn; 
+                        nn.id = sid; 
+                        for (auto const& [k, v] : snd) nn.attrs[k.cast<string>()] = py::reinterpret_borrow<py::object>(v);
+                        result.nodes.push_back(nn); 
+                        added_nodes.insert(sid);
+                    }
+                }
+            } else {
+                if (added_nodes.find(n.id) == added_nodes.end()) {
+                    result.nodes.push_back(n); added_nodes.insert(n.id);
+                }
+            }
+        }
+    }
+    return result;
+}
+
 Graph collapse_node_nx_location(const Graph& graph) {
     Graph expanded;
     unordered_map<string, string> orig_to_main;
@@ -474,3 +575,37 @@ Graph collapse_node_nx_location(const Graph& graph) {
     return collapse_node_nx(expanded); // Basic version, the Python one has location in signature
 }
 
+vector<Graph> build_subgraph_nx(const Graph& graph) {
+    // Weakly connected components
+    unordered_map<string, vector<string>> adj;
+    for (const auto& e : graph.edges) {
+        adj[e.source].push_back(e.target);
+        adj[e.target].push_back(e.source);
+    }
+    
+    unordered_set<string> visited;
+    vector<Graph> components;
+    
+    for (const auto& n : graph.nodes) {
+        if (visited.find(n.id) == visited.end()) {
+            unordered_set<string> component_nodes;
+            vector<string> q = {n.id};
+            visited.insert(n.id);
+            while (!q.empty()) {
+                string curr = q.back(); q.pop_back();
+                component_nodes.insert(curr);
+                for (const auto& nb : adj[curr]) {
+                    if (visited.find(nb) == visited.end()) {
+                        visited.insert(nb); q.push_back(nb);
+                    }
+                }
+            }
+            
+            Graph cg;
+            for (const auto& node : graph.nodes) if (component_nodes.count(node.id)) cg.nodes.push_back(node);
+            for (const auto& edge : graph.edges) if (component_nodes.count(edge.source)) cg.edges.push_back(edge);
+            components.push_back(cg);
+        }
+    }
+    return components;
+}
