@@ -170,6 +170,8 @@ class Graph:
         return new_graph
 
     def collapse_node_nx(self, graph):
+        if graph_native:
+            return graph_native.collapse_node_nx(graph)
         G = self.build_graph_nx(graph)
         node_to_id_map = {node["data"]["id"]: node["data"] for node in graph.get("nodes", [])}
         signatures = {}
@@ -185,15 +187,15 @@ class Graph:
                 signature = tuple(sorted(edges))
 
             signatures.setdefault(signature, []).append(node)
-        # print("Signuature finished: ", signatures)
+        # print("Signuature finished: ", signatures)        
         # Merge nodes based on their signatures
         for nodes in signatures.values():
             first_node = nodes[0]
-            base_label = first_node.split(" ")[0]
+            base_label = G.nodes[first_node].get("type", first_node.split(" ")[0])
             merged_id = generate()  # Generate a new unique ID for the merged node
 
             if len(nodes) == 1:
-                name = G.nodes[first_node]["data"]["name"]
+                name = G.nodes[first_node]["name"]
             else:
                 name = f'{len(nodes)} {base_label} nodes'
 
