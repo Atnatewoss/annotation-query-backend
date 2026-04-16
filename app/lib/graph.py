@@ -1,13 +1,15 @@
-from nanoid import generate
-import json
-import hashlib
-from app.lib.utils import extract_middle
-import random
-from copy import deepcopy
 import networkx as nx
 from networkx.readwrite import json_graph
-from copy import deepcopy
 import random
+import json
+import hashlib
+from nanoid import generate
+from app.lib.utils import extract_middle
+from copy import deepcopy
+try:
+    import graph_native
+except ImportError:
+    graph_native = None
 
 class Graph:
     def __init__(self):
@@ -52,6 +54,8 @@ class Graph:
         Each connection is keyed by the edge label and stores whether
         the node is the source, and a set of node IDs it connects to.
         '''
+        if graph_native:
+            return graph_native.get_node_to_connections_map(graph)
         node_to_id_map = {node["data"]["id"]: node["data"] for node in graph.get("nodes", [])}
         node_mapping = {}
 
@@ -60,11 +64,9 @@ class Graph:
             connections = node_mapping.get(node_key, {})
             edge_id = edge["data"]["edge_id"]
             if edge_id not in connections:
-                connections[edge_id] = {"is_source": (
-                    node_role == "source"), "nodes": set()}
+                connections[edge_id] = {"is_source": (node_role == "source"), "nodes": set()}
             # Determine the “other” node for this edge.
-            other_node = edge["data"]["target"] if node_role == "source"\
-                else edge["data"]["source"]
+            other_node = edge["data"]["target"] if node_role == "source" else edge["data"]["source"]
             connections[edge_id]["nodes"].add(other_node)
             node_mapping[node_key] = connections
 
@@ -79,6 +81,8 @@ class Graph:
         Collapse nodes that have the same connectivity.
         Returns a new graph where groups of nodes have been merged into a single node.
         """
+        if graph_native:
+            return graph_native.collapse_nodes(graph)
         node_mapping, node_to_id_map = self.get_node_to_connections_map(graph)
         map_string = {}  # Maps a hash to a group { connections, nodes }
         ids = {}         # Maps each original node ID to its group hash
