@@ -103,3 +103,94 @@ pair<unordered_map<string, unordered_map<string, py::dict>>, unordered_map<strin
     
     return {node_mapping, node_to_id_map};
 }
+
+Graph collapse_nodes(const Graph& graph) {
+    auto [node_mapping, node_to_id_map] = get_node_to_connections_map(graph);
+    
+    unordered_map<string, py::dict> map_string;
+    unordered_map<string, string> ids;
+    
+    for (auto const& [node_id, connections] : node_mapping) {
+        vector<string> sig_parts;
+        for (auto const& [edge_id, conn] : connections) {
+            py::list nodes_list = py::list(conn["nodes"]);
+            vector<string> nodes_vec;
+            for (auto n : nodes_list) nodes_vec.push_back(n.cast<string>());
+            sort(nodes_vec.begin(), nodes_vec.end());
+            
+            string part = (conn["is_source"].cast<bool>() ? "S" : "T") + edge_id;
+            for (const auto& n : nodes_vec) part += "|" + n;
+            sig_parts.push_back(part);
+        }
+        sort(sig_parts.begin(), sig_parts.end());
+        string full_sig = "";
+        for (const auto& s : sig_parts) full_sig += s + ";";
+        
+        if (map_string.find(full_sig) == map_string.end()) {
+            py::dict group;
+            group["nodes"] = py::list();
+            py::list conns_list;
+            for (auto const& [edge_id, conn] : connections) conns_list.append(conn);
+            group["connections"] = conns_list;
+            map_string[full_sig] = group;
+        }
+        map_string[full_sig]["nodes"].cast<py::list>().append(node_to_id_map[node_id]);
+        ids[node_id] = full_sig;
+    }
+    
+    Graph new_graph;
+    for (auto const& [group_hash, group] : map_string) {
+        py::list group_nodes = group["nodes"].cast<py::list>();
+        if (group_nodes.empty()) continue;
+        
+        unordered_set<string> group_node_ids;
+        for (auto n : group_nodes) group_node_ids.insert(n.cast<py::dict>()["id"].cast<string>());
+        
+        py::dict rep_node;
+        for (const auto& n : graph.nodes) {
+            if (group_node_ids.count(n.id)) {
+                rep_node = py::cast(n.attrs);
+                break;
+            }
+        }
+        
+        string node_type = rep_node["type"].cast<string>();
+        string name = (group_nodes.size() == 1) ? rep_node["name"].cast<string>() : to_string(group_nodes.size()) + " " + node_type + " nodes";
+        
+        Node new_node;
+        new_node.id = group_hash;
+        new_node.attrs["id"] = py::cast(new_node.id);
+        new_node.attrs["type"] = py::cast(node_type);
+        new_node.attrs["name"] = py::cast(name);
+        new_node.attrs["nodes"] = group_nodes;
+        new_graph.nodes.push_back(new_node);
+        
+        unordered_set<string> added;
+        py::list conns = group["connections"].cast<py::list>();
+        for (auto c_item : conns) {
+            py::dict c = c_item.cast<py::dict>();
+            if (c["is_source"].cast<bool>()) {
+                py::list target_nodes = py::list(c["nodes"]);
+                for (auto tn : target_nodes) {
+                    string tn_str = tn.cast<string>();
+                    if (ids.count(tn_str)) {
+                        string other_hash = ids[tn_str];
+                        string edge_id = c["edge_id"].cast<string>();
+                        string key = edge_id + group_hash + other_hash;
+                        if (added.find(key) == added.end()) {
+                            Edge e;
+                            e.id = generate_nanoid();
+                            e.edge_id = edge_id;
+                            e.label = extract_middle(edge_id);
+                            e.source = group_hash;
+                            e.target = other_hash;
+                            new_graph.edges.push_back(e);
+                            added.insert(key);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return new_graph;
+}
