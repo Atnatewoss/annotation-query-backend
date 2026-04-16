@@ -233,30 +233,26 @@ class Graph:
         graph = self.convert_to_graph_json(G)
         return graph
 
-    def convert_to_graph_json(self, graph):
+    def convert_to_graph_json(self, graph, allow_data=True):
         """
         Convert a networkx graph to a json representation.
         """
+        if graph_native and not isinstance(graph, (nx.Graph, nx.DiGraph, nx.MultiDiGraph, nx.MultiGraph)):
+            return graph_native.convert_to_graph_json(graph, allow_data)
         graph_json = {"nodes": [], "edges": []}
-
-        # build the nodes
         for node in graph.nodes():
             if allow_data:
-                data = {
-                    "data": graph.nodes[node]  # Get the node's attributes here
-                }
+                data = {"data": graph.nodes[node]}
             else:
-                data = graph.nodes[nodes]
+                data = graph.nodes[node]
             graph_json['nodes'].append(data)
-
-        # build the edges
         for u, v, data in graph.edges(data=True):
             if allow_data:
                 edge = {
                     "data": {
                         "source": u,
                         "target": v,
-                        "id": data['id'], # Any edge attributes
+                        "id": data['id'],
                         "label": data['label'],
                         "edge_id": data['edge_id']
                     }
@@ -270,7 +266,6 @@ class Graph:
                     "edge_id": data['edge_id']
                 }
             graph_json['edges'].append(edge)
-
         return graph_json
 
     def group_into_parents(self, graph):
