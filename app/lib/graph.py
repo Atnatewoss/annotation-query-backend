@@ -1,122 +1,30 @@
-from nanoid import generate
-import json
-import hashlib
-from app.lib.utils import extract_middle
-import random
-from copy import deepcopy
 import networkx as nx
 from networkx.readwrite import json_graph
-from copy import deepcopy
 import random
+import json
+import hashlib
+from nanoid import generate
+from app.lib.utils import extract_middle
+from copy import deepcopy
+try:
+    import graph_native
+except ImportError:
+    graph_native = None
 
 class Graph:
     def __init__(self):
         pass
 
     def group_graph(self, graph):
+        if graph_native:
+            return graph_native.group_graph(graph)
         graph = self.collapse_node_nx(graph)
         graph = self.group_into_parents(graph)
         return graph
 
-    def collapse_node_nx_location(self, graph):
-        """
-        Group nodes and edges of a graph based on their cellular location.
-
-         - Nodes with multiple locations are duplicated per location and linked
-           with a `location_alias` edge.
-         - Original edges are remapped to the chosen main duplicate node.
-         - Nodes with the same location and identical in/out edge patterns
-           are merged into a single meta-node.
-         - Returns a simplified graph JSON with redundant nodes collapsed.
-        """
-        G = nx.DiGraph()
-        node_to_id_map = {}
-        original_id_to_main_id = {}
-
-        for node_entry in graph.get("nodes", []):
-            node_data = deepcopy(node_entry["data"])
-            node_id = node_data["id"]
-            locations = node_data.get("location", "")
-            location_list = [loc.strip() for loc in locations.split(",") if loc.strip()] or [""]
-
-            # Generate unique IDs per location
-            dup_nodes = []
-            for idx, location in enumerate(location_list):
-                dup_data = deepcopy(node_data)
-                dup_data["location"] = location
-                dup_id = f"{node_id}_loc_{idx}" if len(location_list) > 1 else node_id
-                dup_data["id"] = dup_id
-                dup_nodes.append((dup_id, dup_data))
-
-            # Choose a main node arbitrarily
-            main_dup_id, main_data = random.choice(dup_nodes)
-            main_data.pop("duplicate", None)  # Ensure no duplicate flag
-
-            for dup_id, dup_data in dup_nodes:
-                if dup_id != main_dup_id:
-                    dup_data["duplicate"] = True
-                    G.add_node(dup_id, data=dup_data)
-                    # Connect to main node
-                    G.add_edge(dup_id, main_dup_id, id=generate(), edge_id="location_alias", label="location_alias")
-                else:
-                    G.add_node(dup_id, data=dup_data)
-
-                node_to_id_map[dup_id] = dup_data
-
-            # Map original ID to selected main node
-            original_id_to_main_id[node_id] = main_dup_id
-
-        # Add edges with remapped node IDs
-        for edge in graph.get("edges", []):
-            src = original_id_to_main_id.get(edge["data"]["source"], edge["data"]["source"])
-            tgt = original_id_to_main_id.get(edge["data"]["target"], edge["data"]["target"])
-            edge_data = edge["data"]
-            G.add_edge(src, tgt, **edge_data)
-
-        # Group nodes by (location, in_edges, out_edges)
-        signatures = {}
-        for node in G.nodes():
-            node_data = G.nodes[node].get("data", {})
-            location = node_data.get("location", "")
-            in_edges = [(u, data['edge_id']) for u, _, data in G.in_edges(node, data=True)]
-            out_edges = [(v, data['edge_id']) for _, v, data in G.out_edges(node, data=True)]
-            signature = (location, tuple(sorted(in_edges)), tuple(sorted(out_edges)))
-            signatures.setdefault(signature, []).append(node)
-
-        # Collapse by signature
-        for nodes in signatures.values():
-            if len(nodes) == 1:
-                continue
-
-            base_label = G.nodes[nodes[0]]["data"]["id"].split(" ")[0]
-            merged_id = generate()
-            name = f'{len(nodes)} {base_label} nodes'
-            other_nodes = [node_to_id_map[n] for n in nodes]
-
-            merged_attrs = {
-                "type": base_label,
-                "name": name,
-                "nodes": other_nodes,
-                "id": merged_id,
-            }
-
-            G.add_node(merged_id, **merged_attrs)
-
-            connected_nodes = set()
-            for node in nodes:
-                for u, _, data in G.in_edges(node, data=True):
-                    if u not in nodes and u not in connected_nodes:
-                        G.add_edge(u, merged_id, **data)
-                        connected_nodes.add(u)
-                for _, v, data in G.out_edges(node, data=True):
-                    if v not in nodes and v not in connected_nodes:
-                        G.add_edge(merged_id, v, **data)
-                        connected_nodes.add(v)
-                G.remove_node(node)
-
-        return self.convert_to_graph_json(G)
-
     def group_node_only(self, graph, request):
+        if graph_native:
+            return graph_native.group_node_only(graph, request)
         nodes = graph['nodes']
         new_graph = {'nodes': [], 'edges': []}
 
@@ -150,6 +58,8 @@ class Graph:
         Each connection is keyed by the edge label and stores whether
         the node is the source, and a set of node IDs it connects to.
         '''
+        if graph_native:
+            return graph_native.get_node_to_connections_map(graph)
         node_to_id_map = {node["data"]["id"]: node["data"] for node in graph.get("nodes", [])}
         node_mapping = {}
 
@@ -158,11 +68,9 @@ class Graph:
             connections = node_mapping.get(node_key, {})
             edge_id = edge["data"]["edge_id"]
             if edge_id not in connections:
-                connections[edge_id] = {"is_source": (
-                    node_role == "source"), "nodes": set()}
+                connections[edge_id] = {"is_source": (node_role == "source"), "nodes": set()}
             # Determine the “other” node for this edge.
-            other_node = edge["data"]["target"] if node_role == "source"\
-                else edge["data"]["source"]
+            other_node = edge["data"]["target"] if node_role == "source" else edge["data"]["source"]
             connections[edge_id]["nodes"].add(other_node)
             node_mapping[node_key] = connections
 
@@ -177,6 +85,8 @@ class Graph:
         Collapse nodes that have the same connectivity.
         Returns a new graph where groups of nodes have been merged into a single node.
         """
+        if graph_native:
+            return graph_native.collapse_nodes(graph)
         node_mapping, node_to_id_map = self.get_node_to_connections_map(graph)
         map_string = {}  # Maps a hash to a group { connections, nodes }
         ids = {}         # Maps each original node ID to its group hash
@@ -214,7 +124,7 @@ class Graph:
         # For each group, create a new compound node and new edges.
         for group_hash, group in map_string.items():
             # Find a representative node from the original annotation
-            rep_node = rep_node = next((n for n in graph["nodes"]\
+            rep_node = next((n for n in graph["nodes"]\
                 if n["data"]["id"] in \
                     {node["id"] for node in group["nodes"]}), None)
 
@@ -264,6 +174,8 @@ class Graph:
         return new_graph
 
     def collapse_node_nx(self, graph):
+        if graph_native:
+            return graph_native.collapse_node_nx(graph)
         G = self.build_graph_nx(graph)
         node_to_id_map = {node["data"]["id"]: node["data"] for node in graph.get("nodes", [])}
         signatures = {}
@@ -279,15 +191,15 @@ class Graph:
                 signature = tuple(sorted(edges))
 
             signatures.setdefault(signature, []).append(node)
-        # print("Signuature finished: ", signatures)
+        # print("Signuature finished: ", signatures)        
         # Merge nodes based on their signatures
         for nodes in signatures.values():
             first_node = nodes[0]
-            base_label = first_node.split(" ")[0]
+            base_label = G.nodes[first_node].get("type", first_node.split(" ")[0])
             merged_id = generate()  # Generate a new unique ID for the merged node
 
             if len(nodes) == 1:
-                name = G.nodes[first_node]["data"]["name"]
+                name = G.nodes[first_node]["name"]
             else:
                 name = f'{len(nodes)} {base_label} nodes'
 
@@ -325,44 +237,26 @@ class Graph:
         graph = self.convert_to_graph_json(G)
         return graph
 
-    def build_graph_nx(self, graph):
-        G = nx.MultiDiGraph()
-        # Create nodes
-        nodes = graph['nodes']
-        for node in nodes:
-            G.add_node(node['data']['id'], **node)
-        # Create edges
-        edges = graph['edges']
-        for edge in edges:
-            G.add_edge(edge['data']['source'], edge['data']['target'], edge_id=edge['data']['edge_id'], label=edge['data']['label'], id=generate())
-
-        return G
-
-
-    def convert_to_graph_json(self, graph):
+    def convert_to_graph_json(self, graph, allow_data=True):
         """
         Convert a networkx graph to a json representation.
         """
+        if graph_native and not isinstance(graph, (nx.Graph, nx.DiGraph, nx.MultiDiGraph, nx.MultiGraph)):
+            return graph_native.convert_to_graph_json(graph, allow_data)
         graph_json = {"nodes": [], "edges": []}
-
-        # build the nodes
         for node in graph.nodes():
             if allow_data:
-                data = {
-                    "data": graph.nodes[node]  # Get the node's attributes here
-                }
+                data = {"data": graph.nodes[node]}
             else:
-                data = graph.nodes[nodes]
+                data = graph.nodes[node]
             graph_json['nodes'].append(data)
-
-        # build the edges
         for u, v, data in graph.edges(data=True):
             if allow_data:
                 edge = {
                     "data": {
                         "source": u,
                         "target": v,
-                        "id": data['id'], # Any edge attributes
+                        "id": data['id'],
                         "label": data['label'],
                         "edge_id": data['edge_id']
                     }
@@ -376,7 +270,6 @@ class Graph:
                     "edge_id": data['edge_id']
                 }
             graph_json['edges'].append(edge)
-
         return graph_json
 
     def group_into_parents(self, graph):
@@ -385,6 +278,8 @@ class Graph:
         This creates compound (parent) nodes for groups of nodes
         that share identical edges.
         """
+        if graph_native:
+            return graph_native.group_into_parents(graph)
         # Create directed graph to capture edge relationships
         G = nx.DiGraph()
 
@@ -537,6 +432,8 @@ class Graph:
         return graph
 
     def collapse_node_nx_location(self, graph):
+        if graph_native:
+            return graph_native.collapse_node_nx_location(graph)
         G = nx.DiGraph()
         node_to_id_map = {}
         original_id_to_main_id = {}
@@ -625,6 +522,8 @@ class Graph:
         return self.convert_to_graph_json(G, allow_data=False)
 
     def break_grouping(self, graph):
+        if graph_native:
+            return graph_native.break_grouping(graph)
         nodes = graph['nodes']
         edges = graph['edges']
 
@@ -713,9 +612,12 @@ class Graph:
 
         for key, value in node_to_edge_relationship.items():
             edge_id_arr = key.split(' ')
-            middle_arr = edge_id_arr[1].split('_')
-            middle = '_'.join(middle_arr[1:len(middle_arr)])
-            edge_id = f'{edge_id_arr[0]}_{middle}'
+            if len(edge_id_arr) > 1:
+                middle_arr = edge_id_arr[1].split('_')
+                middle = '_'.join(middle_arr[1:len(middle_arr)])
+                edge_id = f'{edge_id_arr[0]}_{middle}'
+            else:
+                edge_id = f"{value['source']}_{value['label']}_{value['target']}"
             response['edges'].append({
                 'data': {
                     'id': generate(),
@@ -753,6 +655,11 @@ class Graph:
         return G
 
     def build_subgraph_nx(self, graph):
+        if graph_native and not isinstance(graph, (nx.Graph, nx.DiGraph, nx.MultiDiGraph, nx.MultiGraph)):
+            subgraphs_data = graph_native.build_subgraph_nx(graph)
+            # Convert back to NX objects
+            return [self.build_graph_nx(sd) for sd in subgraphs_data]
+        
         # Identify connected components
         connected_components = list(nx.weakly_connected_components(graph))
 
