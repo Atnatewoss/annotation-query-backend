@@ -82,3 +82,63 @@ class Result_Formatter:
             return self._process_metta_graph(tuples, graph_components)
 
         raise ValueError(f"Unknown format_type for graph processing: {format_type}")
+
+    def _process_neo4j_graph(self, results: Any, graph_components: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Extracts nodes and edges from Neo4j records."""
+        import neo4j
+
+        nodes = []
+        node_seen = {}
+        edges = []
+        edge_seen = set()
+
+        properties_enabled = graph_components.get('properties', True)
+
+        for record in results:
+            for item in record.values():
+                if isinstance(item, neo4j.graph.Node):
+                    label = list(item.labels)[0]
+                    node_id = f"{label} {item['id']}"
+
+                    if node_id in node_seen:
+                        continue
+
+                    node_data = {"id": node_id, "type": label}
+
+                    for key, value in item.items():
+                        if properties_enabled:
+                            if key not in ["id", "synonyms"]:
+                                node_data[key] = value
+                        elif key in self.NAMED_TYPES:
+                            node_data["name"] = value
+
+                    if "name" not in node_data:
+                        node_data["name"] = node_id
+
+                    nodes.append(node_data)
+                    node_seen[node_id] = node_data
+
+                elif isinstance(item, neo4j.graph.Relationship):
+                    source_label = list(item.start_node.labels)[0]
+                    target_label = list(item.end_node.labels)[0]
+                    source_id = f"{source_label} {item.start_node['id']}"
+                    target_id = f"{target_label} {item.end_node['id']}"
+
+                    rel_sig = f"{source_id} - {item.type} - {target_id}"
+                    if rel_sig in edge_seen:
+                        continue
+                    edge_seen.add(rel_sig)
+
+                    edge_data = {
+                        "edge_id": f"{source_label}_{item.type}_{target_label}",
+                        "label": item.type,
+                        "source": source_id,
+                        "target": target_id,
+                    }
+                    
+                    for key, value in item.items():
+                        edge_data["source_data" if key == 'source' else key] = value
+
+                    edges.append(edge_data)
+
+        return nodes, edges
