@@ -8,7 +8,6 @@ import glob
 import os
 from neo4j.graph import Node, Relationship
 from app.error import ThreadStopException
-from app.lib.result_formatter import Result_Formatter
 
 load_dotenv()
 
@@ -27,6 +26,7 @@ class CypherQueryGenerator(QueryGeneratorInterface):
             os.getenv('FLY_NEO4J_URI'),
             auth=(os.getenv('FLY_NEO4J_USERNAME'), os.getenv('FLY_NEO4J_PASSWORD'))
         )
+        from app.lib.result_formatter import Result_Formatter
         self.formatter = Result_Formatter()
         # self.dataset_path = dataset_path
         # self.load_dataset(self.dataset_path)

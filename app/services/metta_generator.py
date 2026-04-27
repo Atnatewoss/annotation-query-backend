@@ -4,7 +4,6 @@ from hyperon import MeTTa, SymbolAtom, ExpressionAtom, GroundedAtom
 import logging
 from .query_generator_interface import QueryGeneratorInterface
 from .metta import Metta_Ground, metta_seralizer
-from app.lib.result_formatter import Result_Formatter
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,6 +15,7 @@ class MeTTa_Query_Generator(QueryGeneratorInterface):
         self.dataset_path = dataset_path
         self.load_dataset(self.dataset_path)
         self.initialize_grounatoms()
+        from app.lib.result_formatter import Result_Formatter
         self.formatter = Result_Formatter()
 
     def initialize_space(self):

@@ -8,7 +8,6 @@ from app import app, perf_logger
 from dotenv import load_dotenv
 import time
 import datetime
-from app.lib.result_formatter import Result_Formatter
 
 load_dotenv()
 
@@ -16,6 +15,7 @@ class MorkQueryGenerator:
     def __init__(self, dataset_path):
         self.server = self.connect()
         self.metta = MeTTa()
+        from app.lib.result_formatter import Result_Formatter
         self.formatter = Result_Formatter()
         # self.clear_space()
         # self.load_dataset(dataset_path)
