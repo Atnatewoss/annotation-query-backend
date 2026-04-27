@@ -201,3 +201,50 @@ class Result_Formatter:
             "edges": [{"data": edge} for edge in edges],
         }
 
+    def _process_count(self, data: Any, format_type: str, graph_components: Dict[str, Any]) -> ProcessedCount:
+        """Routes count processing to the appropriate database-specific handler."""
+        if format_type == "neo4j":
+            return self._process_neo4j_count(data, graph_components)
+        elif format_type in ["mork", "metta"]:
+            return self._process_metta_mork_count(data)
+
+        raise ValueError(f"Unknown format_type for count processing: {format_type}")
+
+    def _process_neo4j_count(self, results: Any, graph_components: Dict[str, Any]) -> ProcessedCount:
+        """Aggregates node and edge counts from Neo4j query results."""
+        if not results:
+            return {}
+
+        node_and_edge_count = results[0]
+        count_by_label = results[1] if len(results) > 1 else {}
+
+        node_count = node_and_edge_count.get('total_nodes', 0)
+        edge_count = node_and_edge_count.get('total_edges', 0)
+
+        node_agg = {n['type']: 0 for n in graph_components.get('nodes', [])}
+        edge_agg = {p['type'].replace(" ", "_").lower(): 0 for p in graph_components.get('predicates', [])}
+
+        for key, value in count_by_label.items():
+            label_key = '_'.join(key.split('_')[1:])
+            if label_key in node_agg:
+                node_agg[label_key] += value
+            if label_key in edge_agg:
+                edge_agg[label_key] += value
+
+        return {
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "node_count_by_label": [{'label': k, 'count': v} for k, v in node_agg.items()],
+            "edge_count_by_label": [{'label': k, 'count': v} for k, v in edge_agg.items()],
+        }
+
+    def _process_metta_mork_count(self, results: Any) -> ProcessedCount:
+        """Aggregates node and edge counts from MeTTa/Mork query results."""
+        from app.services.mork import get_total_counts, get_count_by_label
+
+        meta_data = {}
+        if results and results[0]:
+            meta_data.update(get_total_counts(results[0]))
+        if len(results) > 1 and results[1]:
+            meta_data.update(get_count_by_label(results[1]))
+        return meta_data
