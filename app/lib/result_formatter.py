@@ -193,3 +193,11 @@ class Result_Formatter:
                 rels_map[rel_key]["source_data" if prop == "source" else prop] = val
 
         return list(nodes_map.values()), list(rels_map.values())
+
+    def _format_graph_output(self, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> UnifiedGraphOutput:
+        """Wraps standard node and edge dictionaries into the final unified format."""
+        return {
+            "nodes": [{"data": node} for node in nodes],
+            "edges": [{"data": edge} for edge in edges],
+        }
+
