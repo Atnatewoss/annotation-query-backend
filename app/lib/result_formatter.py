@@ -142,3 +142,54 @@ class Result_Formatter:
                     edges.append(edge_data)
 
         return nodes, edges
+
+    def _process_metta_graph(self, tuples: List[Tuple], graph_components: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Extracts nodes and edges from serialized MeTTa/Mork tuples."""
+        nodes_map = {}
+        rels_map = {}
+
+        properties_enabled = graph_components.get('properties', True)
+
+        for match in tuples:
+            graph_attr = match[0]
+            parts = match[1:]
+
+            if graph_attr == "node":
+                prop = parts[0]
+                src_type = parts[1]
+                src_value = parts[2]
+                target_val = parts[3:]
+
+                node_id = f"{src_type} {src_value}"
+
+                if node_id not in nodes_map:
+                    nodes_map[node_id] = {"id": node_id, "type": src_type}
+
+                if properties_enabled:
+                    nodes_map[node_id][prop] = target_val
+                elif prop in self.NAMED_TYPES:
+                    nodes_map[node_id]['name'] = target_val
+
+                nodes_map[node_id].pop('synonyms', None)
+
+            elif graph_attr == "edge":
+                prop = parts[0]
+                label = parts[1]
+                src_type = parts[2]
+                src_id = parts[3]
+                tgt_type = parts[4]
+                tgt_id = parts[5]
+                val = ' '.join(parts[6:])
+
+                rel_key = (label, src_type, src_id, tgt_type, tgt_id)
+                if rel_key not in rels_map:
+                    rels_map[rel_key] = {
+                        "edge_id": f"{src_type}_{label}_{tgt_type}",
+                        "label": label,
+                        "source": f"{src_type} {src_id}",
+                        "target": f"{tgt_type} {tgt_id}",
+                    }
+
+                rels_map[rel_key]["source_data" if prop == "source" else prop] = val
+
+        return list(nodes_map.values()), list(rels_map.values())
