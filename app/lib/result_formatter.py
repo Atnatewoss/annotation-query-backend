@@ -248,3 +248,41 @@ class Result_Formatter:
         if len(results) > 1 and results[1]:
             meta_data.update(get_count_by_label(results[1]))
         return meta_data
+
+    def _process_simple_graph(self, results: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Creates a basic graph structure from identifiers when property fetching yields no results.
+        """
+        nodes_seen = set()
+        nodes = []
+        edges = []
+
+        for result in results:
+            if not result:
+                continue
+
+            source = result.get('source')
+            target = result.get('target')
+            predicate = result.get('predicate')
+
+            for node_id in [source, target]:
+                if node_id and node_id not in nodes_seen:
+                    nodes_seen.add(node_id)
+                    nodes.append({
+                        "id": node_id,
+                        "type": node_id.split(' ')[0],
+                        "name": node_id
+                    })
+
+            if source and target and predicate:
+                source_label = source.split(' ')[0]
+                target_label = target.split(' ')[0]
+                edges.append({
+                    "id": f"{source_label}_{predicate}_{target_label}_{len(edges)}",
+                    "edge_id": f"{source_label}_{predicate}_{target_label}",
+                    "label": predicate,
+                    "source": source,
+                    "target": target,
+                })
+
+        return nodes, edges
